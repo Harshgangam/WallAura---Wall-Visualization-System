@@ -61,8 +61,8 @@
 
 ### Step 1: Clone the Repository
 ```bash
-git clone https://github.com/Harshgangam/WallAura.git
-cd WallAura
+git clone https://github.com/Harshgangam/WallAura---Wall-Visualization-System.git
+cd WallAura---Wall-Visualization-System
 ```
 
 ### Step 2: Install Dependencies
