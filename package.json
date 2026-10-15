@@ -1,0 +1,17 @@
+{
+  "name": "wallaura-root",
+  "version": "1.0.0",
+  "description": "Smart Wall Color Visualization with SegFormer ADE20K and Physically Based Rendering",
+  "scripts": {
+    "postinstall": "cd frontend && npm install",
+    "predev": "node predev.js",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "node run_backend.js",
+    "dev": "concurrently -k -n \"FRONTEND,FASTAPI\" -c \"cyan,magenta\" \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "start": "npm run dev",
+    "build": "cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}
