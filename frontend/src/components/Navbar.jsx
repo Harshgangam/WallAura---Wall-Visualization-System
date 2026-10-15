@@ -7,7 +7,11 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
 
   useEffect(() => {
     const checkHealth = async () => {
-      const endpoints = ["http://127.0.0.1:8000/api/health", "http://localhost:8000/api/health"];
+      const endpoints = [
+        process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/health` : null,
+        "http://127.0.0.1:8000/api/health",
+        "http://localhost:8000/api/health",
+      ].filter(Boolean);
       for (const url of endpoints) {
         try {
           const controller = new AbortController();

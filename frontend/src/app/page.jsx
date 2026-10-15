@@ -12,9 +12,11 @@ import AnalyticsGauges from "@/components/AnalyticsGauges";
 import LuminanceSpectrumChart from "@/components/LuminanceSpectrumChart";
 import { ALL_550_COLORS } from "@/data/colors550";
 
-// Auto-detect and connect to WallAura FastAPI service
-// Tries 127.0.0.1 (IPv4 direct) and falls back to localhost to avoid Windows IPv6 resolution drops
-const API_HOSTS = ["http://127.0.0.1:8000", "http://localhost:8000"];
+const API_HOSTS = [
+  process.env.NEXT_PUBLIC_API_URL,
+  "http://127.0.0.1:8000",
+  "http://localhost:8000",
+].filter(Boolean);
 
 async function safeApiFetch(endpoint, options = {}, maxRetries = 6, onRetry = null) {
   let lastError = null;
