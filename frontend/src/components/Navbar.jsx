@@ -6,16 +6,18 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
   const [modelStatus, setModelStatus] = useState("Checking...");
 
   useEffect(() => {
+    const isCloud = Boolean(process.env.NEXT_PUBLIC_API_URL);
     const checkHealth = async () => {
       const endpoints = [
         process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/health` : null,
         "http://127.0.0.1:8000/api/health",
         "http://localhost:8000/api/health",
       ].filter(Boolean);
+
       for (const url of endpoints) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 2500);
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
           const res = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
           if (res.ok) {
@@ -31,11 +33,11 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
         }
       }
       setBackendConnected(false);
-      setModelStatus("AI Server Starting (Port 8000)...");
+      setModelStatus(isCloud ? "Connecting to AI Cloud (Render)..." : "AI Server Starting (Port 8000)...");
     };
 
     checkHealth();
-    const interval = setInterval(checkHealth, 6000);
+    const interval = setInterval(checkHealth, 8000);
     return () => clearInterval(interval);
   }, [setBackendConnected]);
 
@@ -97,7 +99,7 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
           </div>
 
           <a
-            href="http://localhost:8000/docs"
+            href={process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/docs` : "http://localhost:8000/docs"}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-slate-400 hover:text-white px-2.5 py-1 rounded-md border border-slate-700/50 hover:bg-slate-800/50 transition-colors"
