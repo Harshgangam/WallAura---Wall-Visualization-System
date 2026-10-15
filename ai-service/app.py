@@ -38,10 +38,15 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Preload the SegFormer segmentation model on server start."""
+    """Preload the SegFormer segmentation model on server start with minimal RAM."""
+    import gc
+    import torch
+    torch.set_num_threads(1)
+    torch.set_grad_enabled(False)
     print("[WallAura] Preloading SegFormer AI model...")
     from models.segmentation import get_model
     get_model()
+    gc.collect()
     print("[WallAura] SegFormer AI model ready!")
     yield
 
