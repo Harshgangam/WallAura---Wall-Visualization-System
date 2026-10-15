@@ -119,7 +119,8 @@ export default function Home() {
     intens,
     lightStr,
     clickX = -1,
-    clickY = -1
+    clickY = -1,
+    isInitial = false
   ) => {
     if (!targetFile) return;
     setLoading(true);
@@ -149,7 +150,7 @@ export default function Home() {
         },
         6,
         (attempt, max) => {
-          setLoadingStatus(`Starting up SegFormer AI model... (attempt ${attempt}/${max})`);
+          setLoadingStatus(`Connecting to AI model on Render... (attempt ${attempt}/${max})`);
         }
       );
 
@@ -172,14 +173,18 @@ export default function Home() {
           setDominantColors(data.dominantColors);
         }
       } else {
-        setErrorMsg("Wall detection failed. Please try clicking directly on the wall.");
+        if (!isInitial) {
+          setErrorMsg("Wall detection failed. Please try clicking directly on the wall.");
+        }
       }
     } catch (err) {
       console.warn("[WallAura] Connection notice:", err.message);
-      setErrorMsg(
-        err.message ||
-          "Could not connect to WallAura AI service. Make sure backend is running on port 8000."
-      );
+      if (!isInitial) {
+        setErrorMsg(
+          err.message ||
+            "Could not connect to WallAura AI service. Make sure backend is running or waking up on Render."
+        );
+      }
     } finally {
       setLoading(false);
       setLoadingStatus("");
@@ -274,7 +279,10 @@ export default function Home() {
               selectedSheen,
               timeOfDay,
               intensity,
-              lightStrength
+              lightStrength,
+              -1,
+              -1,
+              true
             );
           } catch (e) {
             // Handled cleanly inside triggerFullDetectionAndApply

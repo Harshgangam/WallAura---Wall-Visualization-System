@@ -91,7 +91,7 @@ class SegmentationModel:
     @torch.no_grad()
     def segment_image(self, image_rgb: np.ndarray) -> dict:
         """
-        Run semantic segmentation on an RGB image.
+        Run semantic segmentation on an RGB image with strict memory bounds for low-RAM hosts.
 
         Args:
             image_rgb: RGB image numpy array (H, W, 3), uint8.
@@ -103,48 +103,67 @@ class SegmentationModel:
                 - 'pred_classes': int32 class ID map (H, W)
                 - 'non_wall_mask': binary uint8 mask (H, W) where 255 = excluded objects
         """
+        import gc
         h, w = image_rgb.shape[:2]
-        pil_img = Image.fromarray(image_rgb)
+
+        # Downscale for memory-safe inference (max 512 on long side, prevents gigabyte tensor allocations)
+        max_dim = 512
+        scale = min(max_dim / max(h, w), 1.0)
+        infer_w = max(32, int(w * scale))
+        infer_h = max(32, int(h * scale))
+
+        if scale < 1.0:
+            small_rgb = cv2.resize(image_rgb, (infer_w, infer_h), interpolation=cv2.INTER_AREA)
+        else:
+            small_rgb = image_rgb
+
+        pil_img = Image.fromarray(small_rgb)
 
         inputs = self.processor(images=pil_img, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         outputs = self.model(**inputs)
-        logits = outputs.logits  # Shape: [1, num_classes, H/4, W/4]
+        logits = outputs.logits  # Shape: [1, num_classes, infer_h/4, infer_w/4]
 
-        # Interpolate logits up to original image dimensions
+        # Interpolate logits ONLY to small inference resolution (e.g. max 512x512)
         upsampled_logits = F.interpolate(
             logits,
-            size=(h, w),
+            size=(infer_h, infer_w),
             mode="bilinear",
             align_corners=False
-        )  # Shape: [1, num_classes, H, W]
+        )  # Shape: [1, num_classes, infer_h, infer_w]
 
-        # Apply indoor contextual prior:
-        # In indoor interior room photography, outdoor sky/road/grass cannot be the wall.
-        # Check if significant indoor classes are present.
-        probs_raw = F.softmax(upsampled_logits, dim=1)[0]
-        ceiling_prob = probs_raw[5].mean().item() if 5 in self.id2label else 0
-        wall_prob_raw = probs_raw[self.wall_id].mean().item()
-
-        # If image is indoors (or has no clear outdoor context), suppress outdoor false positives
-        logits_adjusted = upsampled_logits.clone()
+        # In indoor interior room photography, suppress outdoor false positives on plain walls
         for out_id in OUTDOOR_CLASSES:
-            if out_id < logits_adjusted.shape[1]:
-                logits_adjusted[:, out_id] -= 4.0  # Penalize outdoor confusion on plain walls
+            if out_id < upsampled_logits.shape[1]:
+                upsampled_logits[:, out_id] -= 4.0
 
-        # Softmax over adjusted logits
-        probs = F.softmax(logits_adjusted, dim=1)[0].cpu().numpy()  # [C, H, W]
-        pred_classes = logits_adjusted.argmax(dim=1)[0].cpu().numpy().astype(np.int32)
+        # Softmax over small adjusted logits
+        probs_small = F.softmax(upsampled_logits, dim=1)[0]
+        wall_prob_small = probs_small[self.wall_id].cpu().numpy()
+        pred_classes_small = upsampled_logits.argmax(dim=1)[0].cpu().numpy().astype(np.int32)
 
-        wall_prob = probs[self.wall_id]
-        wall_mask = (pred_classes == self.wall_id).astype(np.uint8) * 255
+        # Free PyTorch tensor memory immediately
+        del inputs, outputs, logits, upsampled_logits, probs_small
+        gc.collect()
 
-        # Also identify all explicitly non-wall objects (windows, doors, ceiling, floor, furniture)
-        non_wall_mask = np.zeros((h, w), dtype=np.uint8)
+        # Build non_wall mask at small resolution (single channel, 1 byte per pixel)
+        non_wall_small = np.zeros((infer_h, infer_w), dtype=np.uint8)
         for cls_id in EXCLUDED_INDOOR_CLASSES:
-            if cls_id < probs.shape[0]:
-                non_wall_mask[pred_classes == cls_id] = 255
+            non_wall_small[pred_classes_small == cls_id] = 255
+
+        # Resize the single-channel 2D masks back to original resolution (w, h)
+        if scale < 1.0:
+            wall_prob = cv2.resize(wall_prob_small, (w, h), interpolation=cv2.INTER_LINEAR)
+            non_wall_mask = cv2.resize(non_wall_small, (w, h), interpolation=cv2.INTER_NEAREST)
+            pred_classes = cv2.resize(pred_classes_small, (w, h), interpolation=cv2.INTER_NEAREST)
+        else:
+            wall_prob = wall_prob_small
+            non_wall_mask = non_wall_small
+            pred_classes = pred_classes_small
+
+        wall_mask = (pred_classes == self.wall_id).astype(np.uint8) * 255
+        wall_mask[non_wall_mask > 0] = 0
 
         return {
             "wall_prob": wall_prob,
