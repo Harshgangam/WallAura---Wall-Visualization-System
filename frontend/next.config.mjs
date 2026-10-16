@@ -8,19 +8,33 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
+  async redirects() {
+    return [
+      {
+        source: "/api",
+        destination: "/",
+        permanent: false,
+      },
+      {
+        source: "/api/py",
+        destination: "/",
+        permanent: false,
+      },
+    ];
+  },
   async rewrites() {
     return [
       {
-        source: "/api/py/api/:path*",
-        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
+        source: "/api/py/api/:path+",
+        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path+",
       },
       {
-        source: "/api/py/:path*",
-        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
+        source: "/api/py/:path+",
+        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path+",
       },
       {
-        source: "/api/:path*",
-        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
+        source: "/api/:path+",
+        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path+",
       },
     ];
   },
