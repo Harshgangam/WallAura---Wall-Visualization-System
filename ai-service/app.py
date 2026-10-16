@@ -75,7 +75,7 @@ async def health_check():
         "status": "healthy",
         "service": "WallAura AI",
         "model": "nvidia/segformer-b0-finetuned-ade-512-512",
-        "version": "2.0.0"
+        "version": "2.1.0-optimized"
     }
 
 
