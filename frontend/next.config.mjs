@@ -11,7 +11,15 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        source: "/api/py/api/:path*",
+        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
+      },
+      {
         source: "/api/py/:path*",
+        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
+      },
+      {
+        source: "/api/:path*",
         destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
       },
     ];

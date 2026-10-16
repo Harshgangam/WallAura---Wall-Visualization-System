@@ -37,7 +37,11 @@ const getApiHosts = () => {
     ];
   }
 
-  return ["/api/py", CLOUD_API_URL];
+  // On deployed Vercel production:
+  // 1. Same-origin relative path (e.g. /api/detect-and-apply proxied through Vercel Edge)
+  // 2. /api/py alias
+  // 3. Direct Render cloud backend as fallback
+  return ["", "/api/py", CLOUD_API_URL];
 };
 
 // Client-side image optimizer: automatically downscales high-res smartphone camera photos (e.g. 12-48MP)
@@ -119,9 +123,16 @@ async function safeApiFetch(endpoint, options = {}, maxRetries = 6, onRetry = nu
           reqOptions.body = options.bodyFactory();
         }
 
-        const res = await fetch(`${host}${endpoint}`, reqOptions);
+        let targetUrl = `${host}${endpoint}`;
+        if (host === "/api/py" && endpoint.startsWith("/api/")) {
+          targetUrl = `/api/py${endpoint.slice(4)}`;
+        }
+
+        const res = await fetch(targetUrl, reqOptions);
         clearTimeout(timeoutId);
-        if (res.ok || res.status < 500) {
+        // If response is OK (200-299) or real client error (400, 422), return it.
+        // If 404 or >= 500, fall through and try next host in the list!
+        if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 404)) {
           return res;
         }
       } catch (err) {

@@ -12,6 +12,7 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
   useEffect(() => {
     const checkHealth = async () => {
       const endpoints = [
+        "/api/health",
         "/api/py/health",
         `${CLOUD_API_URL}/api/health`,
         ...(typeof window !== "undefined" &&
