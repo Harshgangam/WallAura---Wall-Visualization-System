@@ -16,24 +16,110 @@ const CLOUD_API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "https://wallaura-wall-visualization-system.onrender.com";
 
-const API_HOSTS = [
-  CLOUD_API_URL,
-  "http://127.0.0.1:8000",
-  "http://localhost:8000",
-].filter(Boolean);
+// Determine resilient API endpoints based on environment:
+// 1. /api/py (Vercel edge proxy - completely bypasses ISP/DNS blocks on Indian mobile 5G like Jio/Airtel)
+// 2. Direct Render cloud backend as fallback
+// 3. Localhost only when actually running on a local machine
+const getApiHosts = () => {
+  if (typeof window === "undefined") {
+    return [CLOUD_API_URL];
+  }
+
+  const isLocal =
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1";
+
+  if (isLocal) {
+    return [
+      "http://127.0.0.1:8000",
+      "http://localhost:8000",
+      CLOUD_API_URL,
+    ];
+  }
+
+  return ["/api/py", CLOUD_API_URL];
+};
+
+// Client-side image optimizer: automatically downscales high-res smartphone camera photos (e.g. 12-48MP)
+// to a clean 1280px JPEG (~250 KB) before upload. This prevents mobile upload timeouts and eliminates 4.5MB Vercel payload limits.
+async function downscaleImageIfNeeded(file, maxDimension = 1280) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (Math.max(width, height) <= maxDimension) {
+        resolve(file);
+        return;
+      }
+
+      if (width > height) {
+        height = Math.round((height * maxDimension) / width);
+        width = maxDimension;
+      } else {
+        width = Math.round((width * maxDimension) / height);
+        height = maxDimension;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            const resizedFile = new File([blob], file.name ? file.name.replace(/\.[^/.]+$/, ".jpg") : "room.jpg", {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            });
+            resolve(resizedFile);
+          } else {
+            resolve(file);
+          }
+        },
+        "image/jpeg",
+        0.88
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
 
 async function safeApiFetch(endpoint, options = {}, maxRetries = 6, onRetry = null) {
   let lastError = null;
+  const hosts = getApiHosts();
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    for (const host of API_HOSTS) {
+    for (const host of hosts) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
-        const res = await fetch(`${host}${endpoint}`, {
+
+        const reqOptions = {
           ...options,
           signal: controller.signal,
-        });
+        };
+
+        // If bodyFactory is provided, generate a fresh FormData instance for each retry attempt
+        // (prevents consumed stream errors in mobile browsers)
+        if (typeof options.bodyFactory === "function") {
+          reqOptions.body = options.bodyFactory();
+        }
+
+        const res = await fetch(`${host}${endpoint}`, reqOptions);
         clearTimeout(timeoutId);
         if (res.ok || res.status < 500) {
           return res;
@@ -47,11 +133,18 @@ async function safeApiFetch(endpoint, options = {}, maxRetries = 6, onRetry = nu
       if (onRetry) {
         onRetry(attempt, maxRetries);
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      // Progressive backoff to accommodate Render free-tier cold starts (~30-45s)
+      const delay = Math.min(1800 * attempt, 8000);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
-  throw lastError || new Error("WallAura AI service is offline. Please ensure npm run dev is running.");
+  throw (
+    lastError ||
+    new Error(
+      "WallAura AI cloud is waking up or unreachable. Please wait 15 seconds and try again."
+    )
+  );
 }
 
 export default function Home() {
@@ -88,12 +181,16 @@ export default function Home() {
   }, [selectedColor]);
 
   // Handle new room photograph upload
-  const handleImageUpload = (e) => {
-    const uploadedFile = e.target.files?.[0];
-    if (!uploadedFile) return;
+  const handleImageUpload = async (e) => {
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
-    setFile(uploadedFile);
     setErrorMsg("");
+    setLoading(true);
+    setLoadingStatus("Preparing image for AI analysis...");
+
+    const uploadedFile = await downscaleImageIfNeeded(rawFile, 1280);
+    setFile(uploadedFile);
 
     const reader = new FileReader();
     reader.onload = async (ev) => {
@@ -136,21 +233,24 @@ export default function Home() {
     setErrorMsg("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", targetFile);
-      formData.append("color", color);
-      formData.append("sheen", sheen);
-      formData.append("time_of_day", tod);
-      formData.append("intensity", intens.toString());
-      formData.append("light_strength", lightStr.toString());
-      formData.append("click_x", clickX.toString());
-      formData.append("click_y", clickY.toString());
+      const buildFormData = () => {
+        const formData = new FormData();
+        formData.append("file", targetFile);
+        formData.append("color", color);
+        formData.append("sheen", sheen);
+        formData.append("time_of_day", tod);
+        formData.append("intensity", intens.toString());
+        formData.append("light_strength", lightStr.toString());
+        formData.append("click_x", clickX.toString());
+        formData.append("click_y", clickY.toString());
+        return formData;
+      };
 
       const res = await safeApiFetch(
         "/api/detect-and-apply",
         {
           method: "POST",
-          body: formData,
+          bodyFactory: buildFormData,
         },
         6,
         (attempt, max) => {
@@ -203,27 +303,30 @@ export default function Home() {
     setErrorMsg("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("mask_b64", maskB64);
-      formData.append("color", color);
-      formData.append("sheen", sheen);
-      formData.append("time_of_day", tod);
-      formData.append("intensity", intens.toString());
-      formData.append("light_strength", lightStr.toString());
-      if (fgMaskB64) {
-        formData.append("fg_b64", fgMaskB64);
-      }
+      const buildFormData = () => {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("mask_b64", maskB64);
+        formData.append("color", color);
+        formData.append("sheen", sheen);
+        formData.append("time_of_day", tod);
+        formData.append("intensity", intens.toString());
+        formData.append("light_strength", lightStr.toString());
+        if (fgMaskB64) {
+          formData.append("fg_b64", fgMaskB64);
+        }
+        return formData;
+      };
 
       const res = await safeApiFetch(
         "/api/apply-color",
         {
           method: "POST",
-          body: formData,
+          bodyFactory: buildFormData,
         },
         5,
         (attempt, max) => {
-          setLoadingStatus(`Connecting to AI service... (${attempt}/${max})`);
+          setLoadingStatus(`Applying paint finish... (${attempt}/${max})`);
         }
       );
 

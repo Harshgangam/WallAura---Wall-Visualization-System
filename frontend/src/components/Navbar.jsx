@@ -12,9 +12,16 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
   useEffect(() => {
     const checkHealth = async () => {
       const endpoints = [
+        "/api/py/health",
         `${CLOUD_API_URL}/api/health`,
-        "http://127.0.0.1:8000/api/health",
-        "http://localhost:8000/api/health",
+        ...(typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1")
+          ? [
+              "http://127.0.0.1:8000/api/health",
+              "http://localhost:8000/api/health",
+            ]
+          : []),
       ];
 
       for (const url of endpoints) {
@@ -36,7 +43,7 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
         }
       }
       setBackendConnected(false);
-      setModelStatus("Connecting to AI Cloud (Render)...");
+      setModelStatus("Waking AI Cloud (~30s)...");
     };
 
     checkHealth();
@@ -92,13 +99,13 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
 
         {/* Status Indicators */}
         <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/60 border border-slate-700/50 text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-slate-900/60 border border-slate-700/50 text-[11px] sm:text-xs">
             <span
               className={`w-2 h-2 rounded-full ${
                 backendConnected ? "bg-emerald-400 animate-pulse" : "bg-rose-400"
               }`}
             />
-            <span className="text-slate-300 font-medium">{modelStatus}</span>
+            <span className="text-slate-300 font-medium whitespace-nowrap">{modelStatus}</span>
           </div>
 
           <a

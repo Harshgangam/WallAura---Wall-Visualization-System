@@ -8,6 +8,14 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
+  async rewrites() {
+    return [
+      {
+        source: "/api/py/:path*",
+        destination: "https://wallaura-wall-visualization-system.onrender.com/api/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
