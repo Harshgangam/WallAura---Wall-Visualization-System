@@ -68,14 +68,19 @@ app.add_middleware(
 )
 
 
-# ── Health Check ────────────────────────────────────────────────────────
+# ── Health & API Root Check ─────────────────────────────────────────────
 @app.get("/api/health")
+@app.get("/api")
+@app.get("/api/")
+@app.get("/api/py")
+@app.get("/api/py/")
 async def health_check():
     return {
         "status": "healthy",
         "service": "WallAura AI",
         "model": "nvidia/segformer-b0-finetuned-ade-512-512",
-        "version": "2.1.0-optimized"
+        "version": "2.1.0-optimized",
+        "docs_url": "/docs"
     }
 
 

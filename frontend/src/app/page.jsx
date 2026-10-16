@@ -47,15 +47,28 @@ const getApiHosts = () => {
 // Client-side image optimizer: automatically downscales high-res smartphone camera photos (e.g. 12-48MP)
 // to a clean 1280px JPEG (~250 KB) before upload. This prevents mobile upload timeouts and eliminates 4.5MB Vercel payload limits.
 async function downscaleImageIfNeeded(file, maxDimension = 1280) {
-  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  if (!file) return file;
 
   return new Promise((resolve) => {
+    let url = "";
+    try {
+      url = URL.createObjectURL(file);
+    } catch (_) {
+      return resolve(file);
+    }
+
+    const timer = setTimeout(() => {
+      try { URL.revokeObjectURL(url); } catch (_) {}
+      resolve(file);
+    }, 6000);
+
     const img = new Image();
-    const url = URL.createObjectURL(file);
     img.onload = () => {
-      URL.revokeObjectURL(url);
+      clearTimeout(timer);
+      try { URL.revokeObjectURL(url); } catch (_) {}
+
       let { width, height } = img;
-      if (Math.max(width, height) <= maxDimension) {
+      if (!width || !height || Math.max(width, height) <= maxDimension) {
         resolve(file);
         return;
       }
@@ -81,24 +94,80 @@ async function downscaleImageIfNeeded(file, maxDimension = 1280) {
       canvas.toBlob(
         (blob) => {
           if (blob) {
-            const resizedFile = new File([blob], file.name ? file.name.replace(/\.[^/.]+$/, ".jpg") : "room.jpg", {
-              type: "image/jpeg",
-              lastModified: Date.now(),
-            });
+            const resizedFile = new File(
+              [blob],
+              file.name ? file.name.replace(/\.[^/.]+$/, ".jpg") : "room.jpg",
+              { type: "image/jpeg", lastModified: Date.now() }
+            );
             resolve(resizedFile);
           } else {
             resolve(file);
           }
         },
         "image/jpeg",
-        0.88
+        0.85
       );
     };
+
     img.onerror = () => {
-      URL.revokeObjectURL(url);
+      clearTimeout(timer);
+      try { URL.revokeObjectURL(url); } catch (_) {}
       resolve(file);
     };
+
     img.src = url;
+  });
+}
+
+// Instant client-side fallback renderer: blends paint color onto wall mask using HTML5 canvas
+async function clientSideRecolorFallback(imageSrc, maskSrc, colorHex) {
+  if (!imageSrc || !maskSrc) return null;
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const mask = new Image();
+        mask.crossOrigin = "anonymous";
+        mask.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(null);
+
+          // 1. Draw base room image
+          ctx.drawImage(img, 0, 0);
+
+          // 2. Create isolated tinted wall layer
+          const tintCanvas = document.createElement("canvas");
+          tintCanvas.width = img.width;
+          tintCanvas.height = img.height;
+          const tintCtx = tintCanvas.getContext("2d");
+          if (!tintCtx) return resolve(null);
+
+          tintCtx.drawImage(mask, 0, 0);
+          tintCtx.globalCompositeOperation = "source-in";
+          tintCtx.fillStyle = colorHex;
+          tintCtx.fillRect(0, 0, img.width, img.height);
+
+          // 3. Composite with multiply blend to preserve shadows and textures
+          ctx.save();
+          ctx.globalAlpha = 0.88;
+          ctx.globalCompositeOperation = "multiply";
+          ctx.drawImage(tintCanvas, 0, 0);
+          ctx.restore();
+
+          resolve(canvas.toDataURL("image/png"));
+        };
+        mask.onerror = () => resolve(null);
+        mask.src = maskSrc;
+      };
+      img.onerror = () => resolve(null);
+      img.src = imageSrc;
+    } catch (_) {
+      resolve(null);
+    }
   });
 }
 
@@ -310,8 +379,14 @@ export default function Home() {
   const triggerFastRecolor = async (color, sheen, tod, intens, lightStr) => {
     if (!file || !maskB64) return;
     setLoading(true);
-    setLoadingStatus("Applying physically based sheen & lighting...");
+    setLoadingStatus("Applying paint finish...");
     setErrorMsg("");
+
+    // Optimistically render instantly using HTML5 canvas (< 10ms)
+    const instantPreview = await clientSideRecolorFallback(originalImageSrc, maskImageSrc, color);
+    if (instantPreview) {
+      setResultImageSrc(instantPreview);
+    }
 
     try {
       const buildFormData = () => {
@@ -337,20 +412,18 @@ export default function Home() {
         },
         5,
         (attempt, max) => {
-          setLoadingStatus(`Applying paint finish... (${attempt}/${max})`);
+          setLoadingStatus(`Refining with PBR sheen... (${attempt}/${max})`);
         }
       );
 
-      if (!res.ok) {
-        throw new Error(`Failed to apply color: ${res.status}`);
+      if (res && res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        setResultImageSrc(url);
       }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      setResultImageSrc(url);
     } catch (err) {
-      console.warn("[WallAura] Fast recolor notice:", err.message);
-      setErrorMsg("Failed to apply new color/sheen.");
+      console.warn("[WallAura] Cloud recolor notice:", err.message);
+      // If cloud is waking up or offline, the instantPreview is already visible!
     } finally {
       setLoading(false);
       setLoadingStatus("");
@@ -372,43 +445,44 @@ export default function Home() {
     );
   };
 
-  // Auto load room.jpg on initial mount if available
+  // Auto load room.jpg on initial mount with pre-rendered results (0s delay on mobile)
   useEffect(() => {
     let isMounted = true;
 
     async function loadSampleRoom() {
       try {
+        // Immediately present pre-rendered default room and mask (zero waiting, zero delay on mobile)
+        setOriginalImageSrc("/room.jpg");
+        setResultImageSrc("/room_result.png");
+        setMaskImageSrc("/room_mask.png");
+        setComponents([
+          { id: 1, label: 1, area: 318849, area_fraction: 0.66, centroid: [399, 249], bbox: [0, 0, 800, 600] }
+        ]);
+        setRecommendedColors(["#BBA3A3", "#86C4C4", "#CDB197", "#D09EB6", "#2F4F4F"]);
+
+        // Fetch sample file in background so recoloring works immediately
         const res = await fetch("/room.jpg");
-        if (!res.ok) return;
-        const blob = await res.blob();
-        if (!isMounted) return;
+        if (res.ok && isMounted) {
+          const blob = await res.blob();
+          const sampleFile = new File([blob], "room.jpg", { type: "image/jpeg" });
+          setFile(sampleFile);
+        }
 
-        const sampleFile = new File([blob], "room.jpg", { type: "image/jpeg" });
-        setFile(sampleFile);
-
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          if (!isMounted) return;
-          setOriginalImageSrc(ev.target.result);
-          try {
-            await triggerFullDetectionAndApply(
-              sampleFile,
-              selectedColor,
-              selectedSheen,
-              timeOfDay,
-              intensity,
-              lightStrength,
-              -1,
-              -1,
-              true
-            );
-          } catch (e) {
-            // Handled cleanly inside triggerFullDetectionAndApply
-          }
-        };
-        reader.readAsDataURL(sampleFile);
+        // Fetch mask blob and convert to base64 so bucket clicks are active
+        const maskRes = await fetch("/room_mask.png");
+        if (maskRes.ok && isMounted) {
+          const maskBlob = await maskRes.blob();
+          const maskReader = new FileReader();
+          maskReader.onload = (e) => {
+            if (isMounted && e.target?.result) {
+              const b64 = e.target.result.split(",")[1];
+              setMaskB64(b64);
+            }
+          };
+          maskReader.readAsDataURL(maskBlob);
+        }
       } catch (err) {
-        // Silently handled: user can browse and upload their own image
+        // Silently handled
       }
     }
 

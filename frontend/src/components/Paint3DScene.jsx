@@ -452,7 +452,13 @@ export default function Paint3DScene({ selectedColor, onColorSelect }) {
     };
 
     const handleCanvasClick = (e) => {
-      raycaster.setFromCamera(mouse, camera);
+      const rect = container.getBoundingClientRect();
+      const clientX = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const clientY = e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -(((clientY - rect.top) / rect.height) * 2 - 1);
+      const clickMouse = new THREE.Vector2(x, y);
+      raycaster.setFromCamera(clickMouse, camera);
       const intersects = raycaster.intersectObjects(interactiveMeshes, false);
       if (intersects.length > 0) {
         const hitCfg = intersects[0].object.userData.parentConfig;
@@ -464,6 +470,7 @@ export default function Paint3DScene({ selectedColor, onColorSelect }) {
 
     window.addEventListener("pointermove", handlePointerMove);
     container.addEventListener("click", handleCanvasClick);
+    container.addEventListener("touchend", handleCanvasClick);
 
     // 8. Resize Handler
     const handleResize = () => {

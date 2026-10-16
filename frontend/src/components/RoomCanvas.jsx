@@ -49,14 +49,16 @@ export default function RoomCanvas({
     }
   };
 
-  // Split slider mouse events
+  // Split slider mouse and touch events
   const handleMouseDown = () => setIsDraggingSlider(true);
   const handleMouseUp = () => setIsDraggingSlider(false);
 
   const handleMouseMove = (e) => {
     if (!isDraggingSlider || !containerRef.current) return;
+    const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : null);
+    if (clientX === null) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
     const percent = Math.max(5, Math.min(95, (x / rect.width) * 100));
     setSliderPos(percent);
   };
@@ -65,10 +67,16 @@ export default function RoomCanvas({
     if (isDraggingSlider) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("touchmove", handleMouseMove, { passive: true });
+      window.addEventListener("touchend", handleMouseUp);
+      window.addEventListener("touchcancel", handleMouseUp);
     }
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("touchmove", handleMouseMove);
+      window.removeEventListener("touchend", handleMouseUp);
+      window.removeEventListener("touchcancel", handleMouseUp);
     };
   }, [isDraggingSlider]);
 
@@ -303,6 +311,7 @@ export default function RoomCanvas({
                   className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize flex items-center justify-center shadow-[0_0_10px_rgba(0,0,0,0.5)] z-20"
                   style={{ left: `${sliderPos}%` }}
                   onMouseDown={handleMouseDown}
+                  onTouchStart={handleMouseDown}
                 >
                   <div className="w-8 h-8 -ml-3.5 rounded-full bg-white text-slate-900 flex items-center justify-center shadow-lg border-2 border-indigo-600">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
