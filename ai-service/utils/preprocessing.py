@@ -12,13 +12,18 @@ import io
 MAX_PROCESSING_SIZE = 1024  # Max dimension for AI processing
 
 
-def load_image_from_bytes(image_bytes: bytes) -> np.ndarray:
-    """Convert uploaded file bytes to OpenCV BGR image."""
+def load_image_from_bytes(image_bytes: bytes, max_dim: int = 1280) -> np.ndarray:
+    """Convert uploaded file bytes to OpenCV BGR image with memory-safe maximum dimensions."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("Failed to decode image. Ensure the file is a valid JPG or PNG.")
+    h, w = img.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
     return img
+
 
 
 def resize_for_processing(image: np.ndarray, max_size: int = MAX_PROCESSING_SIZE) -> tuple:

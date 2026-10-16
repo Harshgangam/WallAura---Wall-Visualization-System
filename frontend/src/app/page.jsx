@@ -12,8 +12,12 @@ import AnalyticsGauges from "@/components/AnalyticsGauges";
 import LuminanceSpectrumChart from "@/components/LuminanceSpectrumChart";
 import { ALL_550_COLORS } from "@/data/colors550";
 
+const CLOUD_API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://wallaura-wall-visualization-system.onrender.com";
+
 const API_HOSTS = [
-  process.env.NEXT_PUBLIC_API_URL,
+  CLOUD_API_URL,
   "http://127.0.0.1:8000",
   "http://localhost:8000",
 ].filter(Boolean);
@@ -528,7 +532,7 @@ export default function Home() {
                   }
                 }}
                 onSettings={() => {
-                  window.open("http://localhost:8000/docs", "_blank");
+                  window.open(`${CLOUD_API_URL}/docs`, "_blank");
                 }}
               />
 

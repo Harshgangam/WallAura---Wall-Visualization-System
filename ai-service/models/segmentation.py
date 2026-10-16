@@ -106,7 +106,7 @@ class SegmentationModel:
         import gc
         h, w = image_rgb.shape[:2]
 
-        # Downscale for memory-safe inference (max 512 on long side, prevents gigabyte tensor allocations)
+        # Use memory-safe inference resolution
         max_dim = 512
         scale = min(max_dim / max(h, w), 1.0)
         infer_w = max(32, int(w * scale))
@@ -125,45 +125,40 @@ class SegmentationModel:
         outputs = self.model(**inputs)
         logits = outputs.logits  # Shape: [1, num_classes, infer_h/4, infer_w/4]
 
-        # Interpolate logits ONLY to small inference resolution (e.g. max 512x512)
-        upsampled_logits = F.interpolate(
-            logits,
-            size=(infer_h, infer_w),
-            mode="bilinear",
-            align_corners=False
-        )  # Shape: [1, num_classes, infer_h, infer_w]
-
         # In indoor interior room photography, suppress outdoor false positives on plain walls
         for out_id in OUTDOOR_CLASSES:
-            if out_id < upsampled_logits.shape[1]:
-                upsampled_logits[:, out_id] -= 4.0
+            if out_id < logits.shape[1]:
+                logits[:, out_id] -= 4.0
 
-        # Softmax over small adjusted logits
-        probs_small = F.softmax(upsampled_logits, dim=1)[0]
-        wall_prob_small = probs_small[self.wall_id].cpu().numpy()
-        pred_classes_small = upsampled_logits.argmax(dim=1)[0].cpu().numpy().astype(np.int32)
+        # Memory optimization: compute softmax and argmax directly on compact feature map logits (only ~9 MB)
+        # Avoids allocating massive 150-class upsampled 3D tensors that cause OOM on 512MB hosts
+        probs_low = F.softmax(logits, dim=1)[0]
+        wall_prob_low = probs_low[self.wall_id].cpu().numpy().astype(np.float32)
+        pred_classes_low = logits.argmax(dim=1)[0].cpu().numpy().astype(np.int32)
 
         # Free PyTorch tensor memory immediately
-        del inputs, outputs, logits, upsampled_logits, probs_small
+        del inputs, outputs, logits, probs_low
         gc.collect()
 
-        # Build non_wall mask at small resolution (single channel, 1 byte per pixel)
-        non_wall_small = np.zeros((infer_h, infer_w), dtype=np.uint8)
+        # Build non_wall mask at compact resolution (single-channel 2D, 1 byte per pixel)
+        non_wall_low = np.zeros(pred_classes_low.shape, dtype=np.uint8)
         for cls_id in EXCLUDED_INDOOR_CLASSES:
-            non_wall_small[pred_classes_small == cls_id] = 255
+            non_wall_low[pred_classes_low == cls_id] = 255
 
-        # Resize the single-channel 2D masks back to original resolution (w, h)
-        if scale < 1.0:
-            wall_prob = cv2.resize(wall_prob_small, (w, h), interpolation=cv2.INTER_LINEAR)
-            non_wall_mask = cv2.resize(non_wall_small, (w, h), interpolation=cv2.INTER_NEAREST)
-            pred_classes = cv2.resize(pred_classes_small, (w, h), interpolation=cv2.INTER_NEAREST)
-        else:
-            wall_prob = wall_prob_small
-            non_wall_mask = non_wall_small
-            pred_classes = pred_classes_small
+        # Resize single-channel 2D masks back to full image resolution (w, h) using OpenCV
+        wall_prob = cv2.resize(wall_prob_low, (w, h), interpolation=cv2.INTER_LINEAR)
+        non_wall_mask = cv2.resize(non_wall_low, (w, h), interpolation=cv2.INTER_NEAREST)
+        pred_classes = cv2.resize(pred_classes_low, (w, h), interpolation=cv2.INTER_NEAREST)
 
         wall_mask = (pred_classes == self.wall_id).astype(np.uint8) * 255
         wall_mask[non_wall_mask > 0] = 0
+
+        # On Linux, return free memory from heap back to OS kernel immediately
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
 
         return {
             "wall_prob": wall_prob,

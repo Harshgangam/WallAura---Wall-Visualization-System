@@ -5,14 +5,17 @@ import { useEffect, useState } from "react";
 export default function Navbar({ backendConnected, setBackendConnected }) {
   const [modelStatus, setModelStatus] = useState("Checking...");
 
+  const CLOUD_API_URL =
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://wallaura-wall-visualization-system.onrender.com";
+
   useEffect(() => {
-    const isCloud = Boolean(process.env.NEXT_PUBLIC_API_URL);
     const checkHealth = async () => {
       const endpoints = [
-        process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api/health` : null,
+        `${CLOUD_API_URL}/api/health`,
         "http://127.0.0.1:8000/api/health",
         "http://localhost:8000/api/health",
-      ].filter(Boolean);
+      ];
 
       for (const url of endpoints) {
         try {
@@ -33,13 +36,13 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
         }
       }
       setBackendConnected(false);
-      setModelStatus(isCloud ? "Connecting to AI Cloud (Render)..." : "AI Server Starting (Port 8000)...");
+      setModelStatus("Connecting to AI Cloud (Render)...");
     };
 
     checkHealth();
     const interval = setInterval(checkHealth, 8000);
     return () => clearInterval(interval);
-  }, [setBackendConnected]);
+  }, [setBackendConnected, CLOUD_API_URL]);
 
   return (
     <header className="glass-panel sticky top-0 z-50 border-b border-white/10 px-6 py-3.5 backdrop-blur-md">
@@ -99,7 +102,7 @@ export default function Navbar({ backendConnected, setBackendConnected }) {
           </div>
 
           <a
-            href={process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/docs` : "http://localhost:8000/docs"}
+            href={`${CLOUD_API_URL}/docs`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-slate-400 hover:text-white px-2.5 py-1 rounded-md border border-slate-700/50 hover:bg-slate-800/50 transition-colors"
